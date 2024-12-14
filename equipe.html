@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tableau de Bord de Parrainage</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #000000 0%, #a4ff00 100%);
+        }
+        .glass-card {
+            backdrop-filter: blur(10px);
+            background-color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.125);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        .copyable {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .copyable:hover {
+            transform: scale(1.02);
+            color: #2600ff;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+    <div class="w-96 p-6 rounded-xl glass-card">
+        <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">
+            Tableau de Parrainage
+        </h2>
+
+        <div class="space-y-4">
+            <div class="bg-blue-50 p-4 rounded-lg shadow-sm">
+                <p class="text-sm text-gray-600 mb-2">Total d'Équipe</p>
+                <p id="referralCount" class="text-2xl font-bold text-blue-600">0</p>
+            </div>
+
+            <div class="bg-green-50 p-4 rounded-lg shadow-sm">
+                <p class="text-sm text-gray-600 mb-2">Bonus de Parrainage</p>
+                <p id="commissionBalance" class="text-2xl font-bold text-green-600">0 FCFA</p>
+            </div>
+
+            <div class="bg-purple-50 p-4 rounded-lg shadow-sm">
+                <p class="text-sm text-gray-600 mb-2">Code de Parrainage</p>
+                <p id="referralCode" class="text-xl font-bold text-purple-600 copyable">Chargement...</p>
+                <p id="copyMessage" class="text-xs text-green-600 mt-1 hidden">Code copié !</p>
+            </div>
+
+            <div class="bg-indigo-50 p-4 rounded-lg shadow-sm">
+                <p class="text-sm text-gray-600 mb-2">Lien de Parrainage</p>
+                <p id="referralLink" class="text-sm font-medium text-indigo-600 copyable break-words">Chargement...</p>
+                <p id="copyLinkMessage" class="text-xs text-green-600 mt-1 hidden">Lien copié !</p>
+            </div>
+        </div>
+
+        <p class="text-center text-xs text-gray-500 mt-4">
+            Gagnez 10% sur le rechargement de votre filleul
+        </p>
+    </div>
+
+    <script type="module">
+        // Le script Firebase reste le même que dans votre version originale
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getDatabase, ref, get, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+        // Votre configuration Firebase existante
+        const firebaseConfig = {
+            apiKey: "AIzaSyCPQvlxIjvJPkMZQ4qElkHla_xQ5QiZfFs",
+            authDomain: "paris-3df9f.firebaseapp.com",
+            databaseURL: "https://paris-3df9f-default-rtdb.firebaseio.com",
+            projectId: "paris-3df9f",
+            storageBucket: "paris-3df9f.appspot.com",
+            messagingSenderId: "365107415196",
+            appId: "1:365107415196:web:4c0021baec5a51a0f50559"
+        };
+
+           const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const database = getDatabase(app);
+
+    // Fonction pour mettre à jour la commission
+    async function updateCommission(userRef, currentBalance, newCommission) {
+        try {
+            await update(userRef, {
+                commissionBalance: currentBalance + newCommission
+            });
+            document.getElementById("commissionBalance").innerText = `${currentBalance + newCommission} FCFA`;
+        } catch (error) {
+            console.error("Erreur lors de la mise à jour de la commission:", error);
+        }
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            try {
+                const userRef = ref(database, 'users/' + user.uid);
+                const snapshot = await get(userRef);
+                
+                if (snapshot.exists()) {
+                    const userData = snapshot.val();
+                    const referralCode = userData.userReferralCode;
+                    const commissionBalance = userData.commissionBalance || 0;
+
+                    document.getElementById("referralCode").innerText = referralCode;
+                    document.getElementById("commissionBalance").innerText = `${commissionBalance} FCFA`;
+
+                    const referralLink = `${window.location.origin}/index.html?referral=${referralCode}`;
+                    document.getElementById("referralLink").innerText = referralLink;
+
+                    // Gestion des parrainages et commissions
+                    const allUsersRef = ref(database, 'users/');
+                    const allUsersSnapshot = await get(allUsersRef);
+                    let count = 0;
+
+                    if (allUsersSnapshot.exists()) {
+                        const users = allUsersSnapshot.val();
+                        for (const uid in users) {
+                            const referredUser = users[uid];
+                            if (referredUser.referralCodeUsed === referralCode) {
+                                count++;
+                                
+                                // Vérifier si l'utilisateur a une balance positive et n'a pas encore généré de commission
+                                if (referredUser.balance > 0 && !referredUser.hasCommissionBeenPaid) {
+                                    const rechargeAmount = referredUser.balance;
+                                    const commission = rechargeAmount * 0.10;
+
+                                    // Marquer la commission comme payée pour cet utilisateur
+                                    await update(ref(database, `users/${uid}`), {
+                                        hasCommissionBeenPaid: true
+                                    });
+
+                                    // Mettre à jour la commission du parrain
+                                    await updateCommission(userRef, commissionBalance, commission);
+                                }
+                            }
+                        }
+                    }
+
+                    document.getElementById("referralCount").innerText = count;
+                } else {
+                    document.getElementById("referralCode").innerText = "Code non disponible.";
+                }
+            } catch (error) {
+                console.error("Erreur:", error);
+                document.getElementById("referralCode").innerText = "Erreur de chargement.";
+            }
+        } else {
+            document.getElementById("referralCode").innerText = "Veuillez vous connecter.";
+            alert("Vous devez être connecté pour voir votre code de parrainage.");
+            window.location.href = "login.html";
+        }
+    });
+
+    // Copier le code de parrainage
+    document.getElementById("referralCode").onclick = function() {
+        const code = this.innerText;
+        navigator.clipboard.writeText(code).then(() => {
+            document.getElementById("copyMessage").style.display = "block";
+            setTimeout(() => {
+                document.getElementById("copyMessage").style.display = "none";
+            }, 2000);
+        });
+    };
+
+    // Copier le lien de parrainage
+    document.getElementById("referralLink").onclick = function() {
+        const link = this.innerText;
+        navigator.clipboard.writeText(link).then(() => {
+            document.getElementById("copyLinkMessage").style.display = "block";
+            setTimeout(() => {
+                document.getElementById("copyLinkMessage").style.display = "none";
+            }, 2000);
+        });
+    };
+</script> 
+</body>
+</html>

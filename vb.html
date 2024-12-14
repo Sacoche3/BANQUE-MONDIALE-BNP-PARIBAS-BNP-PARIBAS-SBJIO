@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mes Transactions | MonService</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Le style reste le même que dans votre code original */
+        :root {
+            --primary-color: #6a11cb;
+            --secondary-color: #2575fc;
+            --background-color: #f4f7fa;
+            --card-color: #ffffff;
+            --text-dark: #1a1a2e;
+            --text-light: #6b7280;
+        }
+
+        /* ... (reste du CSS inchangé) ... */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mes Retraits Alibaba</h1>
+            <div class="user-info">
+                <img id="user-avatar" src="https://image.noelshack.com/fichiers/2024/49/4/1733359779-1.jpg" alt="Avatar">
+                <span id="user-name">UBER</span>
+            </div>
+        </div>
+        
+        <div id="transaction-list" class="transaction-list">
+            <!-- Les transactions seront ajoutées ici dynamiquement -->
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
+        import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCPQvlxIjvJPkMZQ4qElkHla_xQ5QiZfFs",
+            authDomain: "paris-3df9f.firebaseapp.com",
+            databaseURL: "https://paris-3df9f-default-rtdb.firebaseio.com",
+            projectId: "paris-3df9f",
+            storageBucket: "paris-3df9f.appspot.com",
+            messagingSenderId: "365107415196",
+            appId: "1:365107415196:web:4c0021baec5a51a0f50559"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase();
+        const auth = getAuth();
+
+        // Utility Functions
+        function formatAmount(amount) {
+            // Convertir explicitement en nombre et gérer les cas particuliers
+            const numAmount = parseFloat(amount);
+            if (isNaN(numAmount)) {
+                console.error('Montant invalide:', amount);
+                return '0 FCFA';
+            }
+            return numAmount.toLocaleString('fr-FR') + ' FCFA';
+        }
+
+        function formatDate(timestamp) {
+            // Handle potential undefined or null timestamp
+            if (!timestamp) return 'Date non disponible';
+            
+            try {
+                return new Date(timestamp).toLocaleString('fr-FR', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (error) {
+                console.error('Date formatting error:', error);
+                return 'Date invalide';
+            }
+        }
+
+        function getStatusClass(status) {
+            // Ensure status is always a string
+            const lowercaseStatus = String(status || '').toLowerCase();
+            
+            switch(lowercaseStatus) {
+                case 'approuvé':
+                case 'approved':
+                    return 'status-approved';
+                case 'rejeté':
+                case 'rejected':
+                    return 'status-rejected';
+                default:
+                    return 'status-pending';
+            }
+        }
+
+        function createTransactionCard(transaction, id, isAdmin = false) {
+            // Defensive programming: ensure transaction object exists and has required properties
+            const safeTransaction = {
+                amount: 0,
+                status: 'en attente',
+                timestamp: Date.now(),
+                fees: 0,
+                ...transaction
+            };
+
+            // Déboguer le montant de la transaction
+            console.log('Transaction amount:', safeTransaction.amount);
+
+            const card = document.createElement('div');
+            card.className = 'transaction-card';
+            
+            card.innerHTML = `
+                <div class="transaction-header">
+                    <div class="transaction-amount">
+                        -${formatAmount(safeTransaction.amount)}
+                    </div>
+                    <div class="transaction-status ${getStatusClass(safeTransaction.status)}">
+                        ${safeTransaction.status}
+                    </div>
+                </div>
+
+                <div class="transaction-details">
+                    <div class="transaction-detail">
+                        <i class="fas fa-calendar-alt"></i>
+                        ${formatDate(safeTransaction.timestamp)}
+                    </div>
+                    <div class="transaction-detail">
+                        <i class="fas fa-receipt"></i>
+                        Frais: ${formatAmount(safeTransaction.fees)}
+                    </div>
+                </div>
+
+                ${isAdmin && safeTransaction.status === 'en attente' ? `
+                    <div class="admin-controls">
+                        <button onclick="window.approveTransaction('${id}')" class="approve-btn">
+                            Approuver
+                        </button>
+                        <button onclick="window.rejectTransaction('${id}')" class="reject-btn">
+                            Rejeter
+                        </button>
+                    </div>
+                ` : ''}
+            `;
+            
+            return card;
+        }
+
+        async function updateTransactionStatus(transactionId, status) {
+            if (!auth.currentUser) {
+                console.error('Utilisateur non connecté');
+                return;
+            }
+
+            const userId = auth.currentUser.uid;
+            const transactionRef = ref(db, `users/${userId}/withdrawals/${transactionId}`);
+            
+            try {
+                await update(transactionRef, { status: status });
+                console.log(`Transaction ${transactionId} mise à jour : ${status}`);
+            } catch (error) {
+                console.error('Erreur lors de la mise à jour :', error);
+                alert('Impossible de mettre à jour la transaction');
+            }
+        }
+
+        // Fonctions globales pour les boutons d'administration
+        window.approveTransaction = async (transactionId) => {
+            await updateTransactionStatus(transactionId, 'approuvé');
+        };
+
+        window.rejectTransaction = async (transactionId) => {
+            await updateTransactionStatus(transactionId, 'rejeté');
+        };
+
+        // Authentication State Observer
+        onAuthStateChanged(auth, (user) => {
+            if (!user) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Mise à jour des informations utilisateur
+            document.getElementById('user-name').textContent = user.displayName || 'Utilisateur';
+            
+            const withdrawalsRef = ref(db, `users/${user.uid}/withdrawals`);
+            
+            onValue(withdrawalsRef, (snapshot) => {
+                const transactionList = document.getElementById('transaction-list');
+                transactionList.innerHTML = '';
+
+                if (!snapshot.exists()) {
+                    transactionList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-receipt"></i>
+                            <p>Aucune transaction effectuée</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const transactions = [];
+                snapshot.forEach((childSnapshot) => {
+                    const transactionData = childSnapshot.val();
+                    console.log('Raw transaction data:', transactionData); // Journal de débogage
+
+                    transactions.push({
+                        id: childSnapshot.key,
+                        ...transactionData
+                    });
+                });
+
+                // Trier les transactions du plus récent au plus ancien
+                transactions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+                transactions.forEach((transaction) => {
+                    const isAdmin = user.email === 'admin@example.com';
+                    transactionList.appendChild(createTransactionCard(transaction, transaction.id, isAdmin));
+                });
+            }, (error) => {
+                console.error('Erreur de récupération des transactions :', error);
+                alert('Impossible de charger l\'historique des transactions');
+            });
+        });
+    </script>
+</body>
+</html>

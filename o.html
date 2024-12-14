@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CashFlow Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(to right, #1a2980, #26d0ce);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8">
+        <div class="text-center mb-6">
+            <i class="fas fa-money-bill-wave text-4xl text-green-500 mb-4 block"></i>
+            <h1 class="text-3xl font-bold text-gray-800">CashFlow Pro</h1>
+            <p class="text-gray-500 mt-2">Votre partenaire financier</p>
+        </div>
+
+        <div class="bg-gray-50 rounded-xl p-4 mb-6 text-center">
+            <p class="text-lg text-gray-600">Solde Disponible</p>
+            <p class="text-3xl font-bold text-green-600" id="current-balance">0 FCFA</p>
+        </div>
+
+        <div class="space-y-4">
+            <div class="bg-red-50 border-l-4 border-red-500 p-3 flex items-center">
+                <i class="fas fa-info-circle text-red-500 mr-3"></i>
+                <p class="text-sm text-red-700">Nouveaux frais de transaction : 15%</p>
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-gray-700 mb-2">Montant à Retirer</label>
+                <div class="relative">
+                    <input 
+                        type="number" 
+                        id="amount" 
+                        class="w-full px-4 py-3 pl-8 rounded-lg bg-gray-100 border-transparent focus:border-green-500"
+                        placeholder="Entrez le montant"
+                    >
+                    <span class="absolute left-3 top-3 text-gray-500">FCFA</span>
+                </div>
+            </div>
+
+            <div class="bg-gray-100 rounded-lg p-4 mb-4">
+                <div class="flex justify-between mb-2">
+                    <span>Montant demandé</span>
+                    <span id="requested-amount" class="font-semibold">0 FCFA</span>
+                </div>
+                <div class="flex justify-between mb-2">
+                    <span>Frais (15%)</span>
+                    <span id="fees-amount" class="font-semibold">0 FCFA</span>
+                </div>
+                <div class="flex justify-between font-bold text-green-600 border-t pt-2">
+                    <span>Total</span>
+                    <span id="total-amount">0 FCFA</span>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-gray-700 mb-2">Code de Sécurité</label>
+                <input 
+                    type="password" 
+                    id="security-code" 
+                    class="w-full px-4 py-3 rounded-lg bg-gray-100 border-transparent focus:border-green-500"
+                    placeholder="Entrez votre code de sécurité"
+                >
+            </div>
+
+            <button 
+                id="withdrawal-button" 
+                class="w-full bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 transition-all"
+                disabled
+            >
+                Valider le Retrait
+            </button>
+
+            <div id="message" class="text-center mt-4"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getDatabase, ref, get, update, push } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+        // Configuration Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyCPQvlxIjvJPkMZQ4qElkHla_xQ5QiZfFs",
+            authDomain: "paris-3df9f.firebaseapp.com",
+            databaseURL: "https://paris-3df9f-default-rtdb.firebaseio.com",
+            projectId: "paris-3df9f",
+            storageBucket: "paris-3df9f.appspot.com",
+            messagingSenderId: "365107415196",
+            appId: "1:365107415196:web:4c0021baec5a51a0f50559"
+        };
+
+        // Configurations de retrait
+        const WITHDRAWAL_RULES = {
+            MIN_AMOUNT: 1000,
+            MAX_AMOUNT: 500000,
+            FEE_PERCENTAGE: 0.15
+        };
+
+        // Initialisation Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const database = getDatabase(app);
+
+        // Éléments du DOM
+        const amountInput = document.getElementById('amount');
+        const requestedAmountSpan = document.getElementById('requested-amount');
+        const feesAmountSpan = document.getElementById('fees-amount');
+        const totalAmountSpan = document.getElementById('total-amount');
+        const withdrawalButton = document.getElementById('withdrawal-button');
+        const securityCodeInput = document.getElementById('security-code');
+        const messageDiv = document.getElementById('message');
+        const currentBalanceSpan = document.getElementById('current-balance');
+
+        // Formater le montant
+        function formatAmount(amount) {
+            return amount.toLocaleString('fr-FR') + ' FCFA';
+        }
+
+        // Mise à jour du résumé de retrait
+        function updateWithdrawalSummary() {
+            const amount = parseFloat(amountInput.value) || 0;
+            const fees = amount * WITHDRAWAL_RULES.FEE_PERCENTAGE;
+            const totalAmount = amount + fees;
+
+            requestedAmountSpan.textContent = formatAmount(amount);
+            feesAmountSpan.textContent = formatAmount(fees);
+            totalAmountSpan.textContent = formatAmount(totalAmount);
+
+            validateWithdrawal(amount, totalAmount);
+        }
+
+        // Validation du retrait
+        function validateWithdrawal(amount, totalAmount) {
+            const currentBalance = parseFloat(currentBalanceSpan.textContent.replace(/[^\d.-]/g, ''));
+            
+            withdrawalButton.disabled = true;
+            messageDiv.innerHTML = '';
+
+            if (amount < WITHDRAWAL_RULES.MIN_AMOUNT) {
+                messageDiv.innerHTML = `<p class="text-red-500">Montant minimum: ${formatAmount(WITHDRAWAL_RULES.MIN_AMOUNT)}</p>`;
+            } else if (amount > WITHDRAWAL_RULES.MAX_AMOUNT) {
+                messageDiv.innerHTML = `<p class="text-red-500">Montant maximum: ${formatAmount(WITHDRAWAL_RULES.MAX_AMOUNT)}</p>`;
+            } else if (totalAmount > currentBalance) {
+                messageDiv.innerHTML = '<p class="text-red-500">Solde insuffisant</p>';
+            } else if (securityCodeInput.value.trim() === '') {
+                messageDiv.innerHTML = '<p class="text-red-500">Veuillez entrer votre code de sécurité</p>';
+            } else {
+                withdrawalButton.disabled = false;
+            }
+        }
+
+        // Gestionnaire de retrait
+        async function processWithdrawal() {
+            const amount = parseFloat(amountInput.value);
+            const fees = amount * WITHDRAWAL_RULES.FEE_PERCENTAGE;
+            const totalAmount = amount + fees;
+            const securityCode = securityCodeInput.value;
+
+            try {
+                const user = auth.currentUser;
+                if (!user) {
+                    throw new Error('Utilisateur non connecté');
+                }
+
+                // Vérifier le code de sécurité (vous devez implémenter cette logique)
+                const userRef = ref(database, `users/${user.uid}`);
+                const snapshot = await get(userRef);
+                const userData = snapshot.val();
+
+                if (!userData || userData.securityCode !== securityCode) {
+                    throw new Error('Code de sécurité incorrect');
+                }
+
+                // Mise à jour du solde
+                const newBalance = userData.balance - totalAmount;
+                await update(userRef, { balance: newBalance });
+
+                // Enregistrement de la transaction
+                const withdrawalsRef = ref(database, `users/${user.uid}/withdrawals`);
+                await push(withdrawalsRef, {
+                    amount: amount,
+                    fees: fees,
+                    totalAmount: totalAmount,
+                    date: new Date().toISOString(),
+                    status: 'En cours'
+                });
+
+                // Mise à jour de l'affichage
+                currentBalanceSpan.textContent = formatAmount(newBalance);
+                messageDiv.innerHTML = '<p class="text-green-500">Retrait effectué avec succès!</p>';
+
+                // Réinitialisation du formulaire
+                amountInput.value = '';
+                securityCodeInput.value = '';
+                updateWithdrawalSummary();
+
+            } catch (error) {
+                messageDiv.innerHTML = `<p class="text-red-500">${error.message}</p>`;
+            }
+        }
+
+        // Événements
+        amountInput.addEventListener('input', updateWithdrawalSummary);
+        securityCodeInput.addEventListener('input', updateWithdrawalSummary);
+        withdrawalButton.addEventListener('click', processWithdrawal);
+
+        // Initialisation de la page
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                try {
+                    const userRef = ref(database, `users/${user.uid}`);
+                    const snapshot = await get(userRef);
+                    const userData = snapshot.val();
+
+                    if (userData) {
+                        currentBalanceSpan.textContent = formatAmount(userData.balance || 0);
+                    }
+                } catch (error) {
+                    console.error('Erreur de chargement des données:', error);
+                }
+            } else {
+                // Rediriger vers la page de connexion si non authentifié
+                window.location.href = 'login.html';
+            }
+        });
+    </script>
+</body>
+</html>

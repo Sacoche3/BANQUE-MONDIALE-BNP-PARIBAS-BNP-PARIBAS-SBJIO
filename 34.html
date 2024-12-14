@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retrait Facile</title>
+    
+    <!-- External CSS Libraries -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        /* ... (Précédent code de style reste le même) ... */
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md card-container overflow-hidden">
+        <div class="header-gradient p-6 text-center text-white">
+            <h1 class="text-2xl font-bold flex items-center justify-center gap-3">
+                <i class="fas fa-wallet icon-pulse"></i>
+                Virement Alibaba
+            </h1>
+        </div>
+        
+        <div class="p-6">
+            <!-- Solde Disponible -->
+            <div class="bg-gray-100 rounded-xl p-5 mb-6 text-center">
+                <p class="text-sm text-gray-600 mb-2">Solde disponible</p>
+                <p class="text-4xl font-bold balance-amount" id="current-balance">0 FCFA</p>
+            </div>
+
+            <!-- Informations de Retrait -->
+            <div id="withdrawal-info" class="mb-4"></div>
+
+            <!-- Alerts -->
+            <div class="space-y-3 mb-6">
+                <div class="bg-blue-50 p-3 rounded-lg flex items-center border-l-4 border-blue-500 alert-shimmer">
+                    <i class="fas fa-info-circle text-blue-500 mr-3 icon-pulse"></i>
+                    <p class="text-sm text-blue-800">Frais de retrait de 10% appliqués</p>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded-lg flex items-center border-l-4 border-yellow-500 alert-shimmer">
+                    <i class="fas fa-exclamation-triangle text-yellow-500 mr-3 icon-pulse"></i>
+                    <p class="text-sm text-yellow-800">Limites : 1 000 - 1 000 000 FCFA</p>
+                </div>
+            </div>
+
+            <!-- Formulaire de Retrait -->
+            <form id="withdrawal-form" class="space-y-4">
+                <!-- Montant -->
+                <div>
+                    <label class="block text-gray-700 mb-2 font-medium">Montant du retrait</label>
+                    <input 
+                        type="number" 
+                        id="amount" 
+                        class="w-full px-4 py-3 rounded-lg form-input"
+                        placeholder="Entrez le montant"
+                    >
+                </div>
+
+                <!-- Récapitulatif -->
+                <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Montant demandé</span>
+                        <span id="requested-amount" class="font-semibold">0 FCFA</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Frais (10%)</span>
+                        <span id="fees-amount" class="font-semibold">0 FCFA</span>
+                    </div>
+                    <div class="flex justify-between pt-3 border-t font-bold text-indigo-700">
+                        <span>Montant total</span>
+                        <span id="total-amount">0 FCFA</span>
+                    </div>
+                </div>
+
+                <!-- Code de Retrait -->
+                <div>
+                    <label class="block text-gray-700 mb-2 font-medium">Code de retrait</label>
+                    <input 
+                        type="password" 
+                        id="withdrawalCode" 
+                        class="w-full px-4 py-3 rounded-lg form-input"
+                        placeholder="Entrez votre code secret"
+                    >
+                </div>
+
+                <!-- Bouton de Confirmation -->
+                <button 
+                    id="withdrawal-button" 
+                    class="w-full btn-primary text-white py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                    disabled
+                >
+                    <i class="fas fa-money-bill-wave"></i>
+                    Confirmer le retrait
+                </button>
+
+                <!-- Message -->
+                <div id="message" class="text-center mt-4"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase and App Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getDatabase, ref, get, runTransaction, push } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+        // Configuration Constants
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCPQvlxIjvJPkMZQ4qElkHla_xQ5QiZfFs",
+            authDomain: "paris-3df9f.firebaseapp.com",
+            databaseURL: "https://paris-3df9f-default-rtdb.firebaseio.com",
+            projectId: "paris-3df9f",
+            storageBucket: "paris-3df9f.appspot.com",
+            messagingSenderId: "365107415196",
+            appId: "1:365107415196:web:4c0021baec5a51a0f50559"
+        };
+
+        const WITHDRAWAL_CONFIG = {
+            MIN_AMOUNT: 1000,
+            MAX_AMOUNT: 1000000,
+            FEE_PERCENTAGE: 0.10
+        };
+
+        // Utility Functions
+        const formatAmount = (amount) => {
+            return amount.toLocaleString('fr-FR') + ' FCFA';
+        };
+
+        class WithdrawalManager {
+            constructor(auth, db) {
+                this.auth = auth;
+                this.db = db;
+                this.initializeEventListeners();
+            }
+
+            initializeEventListeners() {
+                document.getElementById('amount').addEventListener('input', this.updateWithdrawalSummary.bind(this));
+                document.getElementById('withdrawal-button').addEventListener('click', this.makeWithdrawal.bind(this));
+            }
+
+            async checkWithdrawalConfig() {
+                const user = this.auth.currentUser;
+                if (!user) return null;
+
+                const configRef = ref(this.db, `users/${user.uid}/withdrawalConfig`);
+                const snapshot = await get(configRef);
+                return snapshot.val();
+            }
+
+            async updateBalance(userId) {
+                const balanceRef = ref(this.db, `users/${userId}/balance`);
+                const snapshot = await get(balanceRef);
+                const balance = snapshot.val() || 0;
+                document.getElementById('current-balance').textContent = formatAmount(balance);
+                return balance;
+            }
+
+            updateWithdrawalSummary() {
+                const amountInput = document.getElementById('amount');
+                const amount = parseFloat(amountInput.value) || 0;
+                const fees = amount * WITHDRAWAL_CONFIG.FEE_PERCENTAGE;
+                const total = amount + fees;
+
+                document.getElementById('requested-amount').textContent = formatAmount(amount);
+                document.getElementById('fees-amount').textContent = formatAmount(fees);
+                document.getElementById('total-amount').textContent = formatAmount(total);
+
+                this.validateWithdrawal(amount, total);
+            }
+
+            validateWithdrawal(amount, total) {
+                const messageDiv = document.getElementById('message');
+                const withdrawalButton = document.getElementById('withdrawal-button');
+                const balance = parseFloat(document.getElementById('current-balance').textContent.replace(/[^\d.-]/g, ''));
+
+                messageDiv.innerHTML = '';
+                withdrawalButton.disabled = true;
+
+                if (amount < WITHDRAWAL_CONFIG.MIN_AMOUNT) {
+                    messageDiv.innerHTML = `<p class="text-red-500"><i class="fas fa-exclamation-circle"></i> Le montant minimum de retrait est de ${formatAmount(WITHDRAWAL_CONFIG.MIN_AMOUNT)}</p>`;
+                } else if (amount > WITHDRAWAL_CONFIG.MAX_AMOUNT) {
+                    messageDiv.innerHTML = `<p class="text-red-500"><i class="fas fa-exclamation-circle"></i> Le montant maximum de retrait est de ${formatAmount(WITHDRAWAL_CONFIG.MAX_AMOUNT)}</p>`;
+                } else if (total > balance) {
+                    messageDiv.innerHTML = '<p class="text-red-500"><i class="fas fa-exclamation-circle"></i> Solde insuffisant pour effectuer ce retrait</p>';
+                } else if (amount > 0) {
+                    withdrawalButton.disabled = false;
+                }
+            }
+
+            async makeWithdrawal() {
+                const amount = parseFloat(document.getElementById('amount').value);
+                const withdrawalCode = document.getElementById('withdrawalCode').value;
+                const messageDiv = document.getElementById('message');
+                const fees = amount * WITHDRAWAL_CONFIG.FEE_PERCENTAGE;
+                const totalAmount = amount + fees;
+
+                try {
+                    const user = this.auth.currentUser;
+                    if (!user) {
+                        throw new Error('Vous devez être connecté');
+                    }
+
+                    const config = await this.checkWithdrawalConfig();
+                    if (!config) {
+                        throw new Error('Veuillez d\'abord configurer vos informations de retrait');
+                    }
+
+                    if (withdrawalCode !== config.code) {
+                        throw new Error('Code de retrait incorrect');
+                    }
+
+                    const balanceRef = ref(this.db, `users/${user.uid}/balance`);
+                    let success = false;
+                    
+                    await runTransaction(balanceRef, (currentBalance) => {
+                        if (currentBalance === null || currentBalance < totalAmount) {
+                            success = false;
+                            return currentBalance;
+                        }
+                        success = true;
+                        return currentBalance - totalAmount;
+                    });
+
+                    if (!success) {
+                        throw new Error('Solde insuffisant pour effectuer ce retrait');
+                    }
+
+                    const withdrawalRef = ref(this.db, `users/${user.uid}/withdrawals`);
+                    await push(withdrawalRef, {
+                        amount: Number(amount),
+                        fees: fees,
+                        totalAmount: totalAmount,
+                        status: 'en attente',
+                        timestamp: Date.now(),
+                        phone: config.phone,
+                        operator: config.operator
+                    });
+
+                    await this.updateBalance(user.uid);
+
+                    messageDiv.innerHTML = '<p class="text-green-500"><i class="fas fa-check-circle"></i> Demande de retrait envoyée avec succès!</p>';
+                    setTimeout(() => {
+                        window.location.href = 'historique.html';
+                    }, 2000);
+                } catch (error) {
+                    messageDiv.innerHTML = `<p class="text-red-500"><i class="fas fa-exclamation-circle"></i> Erreur: ${error.message}</p>`;
+                }
+            }
+
+            async initializePage() {
+                const user = this.auth.currentUser;
+                if (!user) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                await this.updateBalance(user.uid);
+
+                const config = await this.checkWithdrawalConfig();
+                const infoDiv = document.getElementById('withdrawal-info');
+                
+                if (config) {
+                    infoDiv.innerHTML = `
+                        <div class="bg-green-50 border-l-4 border-green-500 p-3 mb-4 flex items-center">
+                            <i class="fas fa-info-circle text-green-500 mr-3"></i>
+                            <div>
+                                <p class="text-green-700 font-semibold">Informations de retrait</p>
+                                <p class="text-sm text-green-600"><i class="fas fa-phone mr-2"></i> Numéro: ${config.phone}</p>
+                                <p class="text-sm text-green-600"><i class="fas fa-building mr-2"></i> Opérateur: ${config.operator}</p>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    infoDiv.innerHTML = `
+                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 flex items-center">
+                            <i class="fas fa-exclamation-triangle text-yellow-500 mr-3"></i>
+                            <p class="text-yellow-700">
+                                Veuillez d'abord <a href="portefeuille.html" class="underline">configurer vos informations de retrait</a>
+                            </p>
+                        </div>
+                    `;
+                    document.getElementById('withdrawal-form').style.display = 'none';
+                }
+            }
+        }
+
+        // Firebase Initialization
+        const app = initializeApp(FIREBASE_CONFIG);
+        const db = getDatabase(app);
+        const auth = getAuth(app);
+
+        // Page Initialization
+        document.addEventListener('DOMContentLoaded', () => {
+            const withdrawalManager = new WithdrawalManager(auth, db);
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    await withdrawalManager.initializePage();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
