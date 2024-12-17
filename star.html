@@ -80,7 +80,7 @@
                 <h2 class="text-xl font-semibold mb-4 text-gray-800">Faire une Mise</h2>
                 <div class="space-y-4">
                     <div class="text-center text-sm text-gray-600 mb-2">
-                        Minimum a déposé : 2500 FCFA
+                        Minimum a déposé : 8500 FCFA
                     </div>
                     <input 
                         type="number" 
@@ -100,7 +100,7 @@
 
             <div class="bg-white rounded-lg p-6 shadow-md">
                 <h2 class="text-xl font-semibold mb-4 text-gray-800">Réclamation</h2>
-                <p class="text-gray-600 mb-4">Récupérez 4% de votre somme déposer jusqu'à 1 ans</p>
+                <p class="text-gray-600 mb-4">Récupérez 15% de votre somme déposer jusqu'à 1 ans</p>
                 <button 
                     onclick="togglePopup()" 
                     class="w-full bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-semibold transition"
@@ -223,7 +223,7 @@
         const auth = getAuth(app);
         const database = getDatabase(app);
 
-        const MINIMUM_BET = 2500; // Montant minimum de mise
+        const MINIMUM_BET = 8500; // Montant minimum de mise
         let totalBets = 0;
         let cycleEndDate = null;
 
@@ -347,8 +347,8 @@
                         return;
                     }
 
-                    // Calculer le montant à réclamer (4 % du total des mises)
-                    const claimAmount = totalBets * 0.04;
+                    // Calculer le montant à réclamer (15 % du total des mises)
+                    const claimAmount = totalBets * 0.15;
                     const newBalance = currentBalance + claimAmount;
 
                     // Mettre à jour le solde et la date de réclamation dans la base de données
